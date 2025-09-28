@@ -13,9 +13,8 @@ RUN set -eux; \
     apt-get update -o Acquire::Retries=3; \
     apt-get install -y --no-install-recommends git ca-certificates openssh-server; \
     rm -rf /var/lib/apt/lists/*; \
-    # SSHD vorbereiten
     mkdir -p /var/run/sshd /etc/ssh/sshd_config.d; \
-    # Minimal-konfig: Port 2222, kein Root-Login, nur User 'container'
+    # Basis-sshd_config (Root-Login aus, Port 2222; Passwort-Login per ENV togglebar)
     printf '%s\n' \
       'Port 2222' \
       'Protocol 2' \
@@ -27,26 +26,21 @@ RUN set -eux; \
       'AllowUsers container' \
       'ClientAliveInterval 120' \
       'ClientAliveCountMax 2' \
-    > /etc/ssh/sshd_config; \
-    # Hostkeys (werden bei Bedarf generiert)
-    ssh-keygen -A; \
-    # VS Code Server & Caches im persistenten Volume ablegen
-    mkdir -p /home/container/.vscode-server /home/container/.cache /home/container/.npm; \
-    chown -R container:container /home/container
+    > /etc/ssh/sshd_config
 
-# VS Code Server persistent
+# VS Code Server & Caches PERSISTENT nach /home/container
 ENV VSCODE_SERVER_DIR=/home/container/.vscode-server \
     XDG_CACHE_HOME=/home/container/.cache \
     NPM_CONFIG_CACHE=/home/container/.npm \
     HOME=/home/container \
     USER=container
 
-# Boot-Wrapper: startet sshd, setzt optional Passwort, dann Original-EntryPoint
+# Boot-Wrapper: startet sshd (als root), setzt optional Passwort, dann chain zum Base-EntryPoint
 COPY boot.sh /usr/local/bin/boot.sh
 RUN chmod +x /usr/local/bin/boot.sh
 
-# Expose für Doku (Port muss im Panel zugewiesen werden)
-EXPOSE 2225/tcp
+# Expose (Dokumentation) – den Host-Port weist du im Panel zu
+EXPOSE 2222/tcp
 
-# Boot als root -> startet sshd -> chain zum Base-EntryPoint
+# ***WICHTIG: Als ROOT bleiben, damit boot.sh root-Rechte hat***
 ENTRYPOINT ["/usr/local/bin/boot.sh"]
