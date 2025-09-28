@@ -1,34 +1,33 @@
 #!/bin/bash
 set -euo pipefail
 
-# Persistente Verzeichnisse sicherstellen
-mkdir -p "${VSCODE_SERVER_DIR:-/home/container/.vscode-server}" \
-         "${XDG_CACHE_HOME:-/home/container/.cache}" \
-         "${NPM_CONFIG_CACHE:-/home/container/.npm}"
+# 1) Hostkeys sicherstellen (manche Images haben keine)
+ssh-keygen -A
 
-# SSH authorized_keys aus persistenter Home-Partition
-# -> Lege deinen PUBLIC KEY in /home/container/.ssh/authorized_keys ab (siehe Schritte unten)
-if [ ! -d /home/container/.ssh ]; then
-  mkdir -p /home/container/.ssh
-  chown -R container:container /home/container/.ssh
-  chmod 700 /home/container/.ssh
-fi
+# 2) persistente Verzeichnisse anlegen (mit korrekten Besitz/Rechten)
+#    keine blanket-chown auf /home/container (Pterodactyl managt Ownership selbst)
+install -d -m 700 -o container -g container /home/container/.ssh || true
+install -d -m 755 -o container -g container "${VSCODE_SERVER_DIR:-/home/container/.vscode-server}"
+install -d -m 755 -o container -g container "${XDG_CACHE_HOME:-/home/container/.cache}"
+install -d -m 755 -o container -g container "${NPM_CONFIG_CACHE:-/home/container/.npm}"
+
+# 3) authorized_keys (falls vorhanden) korrekt setzen
 if [ -f /home/container/.ssh/authorized_keys ]; then
-  chown container:container /home/container/.ssh/authorized_keys
-  chmod 600 /home/container/.ssh/authorized_keys
+  chown container:container /home/container/.ssh/authorized_keys || true
+  chmod 600 /home/container/.ssh/authorized_keys || true
 fi
 
-# Optional: Passwort-Login aktivieren, wenn ENV gesetzt ist
-# (Standard ist 'PasswordAuthentication no' – wird hier temporär auf yes gesetzt, falls gewünscht)
+# 4) Optional: Passwort-Login über ENV aktivieren (default: aus)
+#    Setze im Panel CONTAINER_PASSWORD, wenn du Passwortlogin willst
 if [ -n "${CONTAINER_PASSWORD:-}" ]; then
   echo "container:${CONTAINER_PASSWORD}" | chpasswd
   sed -i 's/^PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 fi
 
-# SSHD starten (daemonisiert sich selbst)
+# 5) sshd starten (als root)
 mkdir -p /var/run/sshd
 /usr/sbin/sshd
 
-# An das originale EntryPoint vom Base-Image chainen
-# (games:source setzt /entrypoint.sh)
+# 6) zum Base-EntryPoint chainen (games:source liefert /entrypoint.sh)
+#    Dieses Script wechselt selbst auf den 'container'-User und startet deinen Server.
 exec /bin/bash /entrypoint.sh
