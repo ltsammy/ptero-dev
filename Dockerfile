@@ -40,7 +40,7 @@ COPY boot.sh /usr/local/bin/boot.sh
 RUN chmod +x /usr/local/bin/boot.sh
 
 # Expose (Dokumentation) – den Host-Port weist du im Panel zu
-EXPOSE 2222/tcp
+EXPOSE 2225/tcp
 
 # ***WICHTIG: Als ROOT bleiben, damit boot.sh root-Rechte hat***
 ENTRYPOINT ["/usr/local/bin/boot.sh"]
