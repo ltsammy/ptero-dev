@@ -3,18 +3,18 @@ FROM --platform=linux/amd64 ghcr.io/pterodactyl/games:source
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Als root arbeiten
+# Root für Setup
 USER root
 
-# APT robust + Git + OpenSSH-Server installieren, Verzeichnisse vorbereiten
+# APT robust + Git + OpenSSH-Server + gosu
 RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /var/lib/apt/lists/partial; \
     apt-get update -o Acquire::Retries=3; \
-    apt-get install -y --no-install-recommends git ca-certificates openssh-server; \
+    apt-get install -y --no-install-recommends git ca-certificates openssh-server gosu; \
     rm -rf /var/lib/apt/lists/*; \
+    # sshd vorbereiten
     mkdir -p /var/run/sshd /etc/ssh/sshd_config.d; \
-    # Basis-sshd_config (Root-Login aus, Port 2222; Passwort-Login per ENV togglebar)
     printf '%s\n' \
       'Port 2222' \
       'Protocol 2' \
@@ -26,21 +26,22 @@ RUN set -eux; \
       'AllowUsers container' \
       'ClientAliveInterval 120' \
       'ClientAliveCountMax 2' \
-    > /etc/ssh/sshd_config
+    > /etc/ssh/sshd_config; \
+    # VS Code Server & Caches (persistentes Volume)
+    mkdir -p /home/container/.vscode-server /home/container/.cache /home/container/.npm
 
-# VS Code Server & Caches PERSISTENT nach /home/container
+# VS Code Server persistent
 ENV VSCODE_SERVER_DIR=/home/container/.vscode-server \
     XDG_CACHE_HOME=/home/container/.cache \
     NPM_CONFIG_CACHE=/home/container/.npm \
     HOME=/home/container \
     USER=container
 
-# Boot-Wrapper: startet sshd (als root), setzt optional Passwort, dann chain zum Base-EntryPoint
+# Boot-Wrapper als EntryPoint
 COPY boot.sh /usr/local/bin/boot.sh
 RUN chmod +x /usr/local/bin/boot.sh
 
-# Expose (Dokumentation) – den Host-Port weist du im Panel zu
-EXPOSE 2225/tcp
+EXPOSE 2222/tcp
 
-# ***WICHTIG: Als ROOT bleiben, damit boot.sh root-Rechte hat***
+# ***BOOT ALS ROOT*** (boot.sh dropt dann auf 'container')
 ENTRYPOINT ["/usr/local/bin/boot.sh"]
