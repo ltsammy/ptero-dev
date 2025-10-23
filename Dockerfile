@@ -8,13 +8,11 @@ USER root
 
 # --- APT robust machen + Git installieren + Persistenz vorbereiten ---
 RUN set -eux; \
-    # APT säubern / Verzeichnisse sicherstellen (fix für "exit 100")
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /var/lib/apt/lists/partial; \
     apt-get update -o Acquire::Retries=3; \
     apt-get install -y --no-install-recommends git ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \
-    # VS Code Server & Caches im persistenten Volume ablegen
     mkdir -p /home/container/.vscode-server /home/container/.cache /home/container/.npm; \
     chown -R container:container /home/container
 
@@ -24,13 +22,18 @@ RUN set -eux; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /var/run/sshd; \
-    # sshd absichern: nur Keys, kein root, kein Challenge, kein X11
+    # sshd absichern: nur Keys, kein root, kein Challenge, kein X11, kein PAM (in Containern oft problematisch)
     sed -i 's/#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config; \
     sed -i 's/#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config; \
     sed -i 's/#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config; \
     sed -i 's/#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config; \
     sed -i 's@#\?AuthorizedKeysFile .*@AuthorizedKeysFile .ssh/authorized_keys@' /etc/ssh/sshd_config; \
-    sed -i 's/#\?X11Forwarding .*/X11Forwarding no/' /etc/ssh/sshd_config
+    sed -i 's/#\?X11Forwarding .*/X11Forwarding no/' /etc/ssh/sshd_config; \
+    if grep -q '^UsePAM' /etc/ssh/sshd_config; then \
+      sed -i 's/^UsePAM.*/UsePAM no/' /etc/ssh/sshd_config; \
+    else \
+      echo 'UsePAM no' >> /etc/ssh/sshd_config; \
+    fi
 
 # --- Wrapper: startet sshd auf dem Pterodactyl-Allocation-Port und übergibt an den Yolk ---
 RUN bash -lc 'cat >/usr/local/bin/with-sshd << "EOF"\n\
@@ -42,7 +45,7 @@ SSHD_PORT=\"${SSHD_PORT:-30022}\"\n\
 if ! ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1; then\n\
   ssh-keygen -A\n\
 fi\n\
-# sshd auf dem gewünschten Port starten (Vorsicht: Wings mappt 1:1, also Port muss identisch sein)\n\
+# sshd auf dem gewünschten Port starten (Wings mappt 1:1)\n\
 mkdir -p /var/run/sshd\n\
 /usr/sbin/sshd -e -o Port=\"${SSHD_PORT}\" &\n\
 # An den Pterodactyl-EntryPoint übergeben, falls vorhanden, sonst CMD\n\
@@ -54,13 +57,18 @@ else\n\
   exec \"$@\"\n\
 fi\n\
 EOF\n\
-'; chmod +x /usr/local/bin/with-sshd
+'; \
+    # Ausführbar + CRLF/BOM entfernen -> Fix für "exec format error"
+    chmod +x /usr/local/bin/with-sshd && \
+    sed -i 's/\r$//' /usr/local/bin/with-sshd && \
+    printf '\xEF\xBB\xBF' | cat - /usr/local/bin/with-sshd > /tmp/ws && \
+    # obige Zeile fügt absichtlich BOM an, nächste entfernt sie wieder; falls keine BOM da ist, bleibt Datei unverändert
+    tail -c +4 /tmp/ws > /usr/local/bin/with-sshd && rm -f /tmp/ws
 
 # --- SSH-Verzeichnis für den container-User vorbereiten ---
 RUN mkdir -p /home/container/.ssh \
  && chown -R container:container /home/container/.ssh \
  && chmod 700 /home/container/.ssh
-
 
 # --- VS Code Server persistieren (wie bei dir) ---
 ENV VSCODE_SERVER_DIR=/home/container/.vscode-server \
